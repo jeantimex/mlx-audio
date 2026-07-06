@@ -3,6 +3,7 @@ import inspect
 import os
 import sys
 from os import PathLike
+from pathlib import Path
 from typing import Any, Optional, Tuple, Union
 
 import mlx.core as mx
@@ -162,6 +163,7 @@ def generate_audio(
     sigma: Optional[float] = None,
     ref_audio: Optional[Union[str, list[str]]] = None,
     ref_text: Optional[Union[str, list[str]]] = None,
+    profile: Optional[str] = None,
     stt_model: Optional[
         Union[str, nn.Module]
     ] = "mlx-community/whisper-large-v3-turbo-asr-fp16",
@@ -191,6 +193,7 @@ def generate_audio(
     - lang_code (str): The language code.
     - ref_audio (mx.array): Reference audio you would like to clone the voice from.
     - ref_text (str): Caption for reference audio.
+    - profile (str): Path to voice profile file with pre-computed speaker embeddings.
     - stt_model_path (str): A mlx whisper model to use to transcribe.
     - output_path (str): Directory path where audio files will be saved.
     - file_prefix (str): The output file path without extension.
@@ -213,6 +216,25 @@ def generate_audio(
         if isinstance(model, str):
             # Load model
             model = load_model(model_path=model)
+
+        # Load voice profile if provided (for Chatterbox-Turbo and similar models)
+        if profile is not None:
+            profile_path = Path(profile)
+            if not profile_path.exists():
+                raise FileNotFoundError(f"Voice profile not found: {profile_path}")
+            try:
+                from mlx_audio.tts.models.chatterbox_turbo.chatterbox_turbo import (
+                    Conditionals,
+                )
+
+                model._conds = Conditionals.load(profile_path)
+                if verbose:
+                    print(f"\033[94mVoice profile:\033[0m {profile_path}")
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to load voice profile: {e}. "
+                    "Profiles are currently supported for Chatterbox-Turbo models."
+                )
 
         ref_audio_values = _as_reference_list(ref_audio)
         ref_text_values = _as_reference_list(ref_text)
@@ -575,6 +597,13 @@ def parse_args():
         action="append",
         default=None,
         help="Caption for reference audio. Repeat to match repeated --ref_audio.",
+    )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Path to voice profile file (pre-computed speaker embeddings). "
+        "Faster than --ref_audio since no audio processing is needed.",
     )
     parser.add_argument(
         "--stt_model",
