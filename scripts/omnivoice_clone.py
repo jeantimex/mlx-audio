@@ -89,6 +89,17 @@ def main():
     parser.add_argument(
         "--duration", type=float, default=None, help="Target duration in seconds"
     )
+    parser.add_argument(
+        "--expression-tags",
+        action="store_true",
+        help="Auto-add expression tags to text",
+    )
+    parser.add_argument(
+        "--expression-provider",
+        choices=["simple", "anthropic", "mlx"],
+        default="simple",
+        help="Provider for expression tag insertion",
+    )
     args = parser.parse_args()
 
     ref_audio_path = Path(args.ref_audio)
@@ -178,13 +189,27 @@ def main():
             del stt
             mx.clear_cache()
 
+    # Process expression tags if enabled
+    text = args.text
+    if args.expression_tags:
+        from mlx_audio.tts.expression_tags import add_expression_tags
+
+        original_text = text
+        text = add_expression_tags(text, args.model, provider=args.expression_provider)
+        print(f"\n\033[94mOriginal text:\033[0m {original_text}")
+        if text != original_text:
+            print(f"\033[92mWith expression tags:\033[0m {text}")
+        else:
+            print(f"\033[93mNo expression tags added\033[0m (no patterns matched)")
+
     # Step 2: Generate speech
     print(f"\nGenerating speech...")
     print(f"  Language: {args.language}")
-    print(f"  Text: {args.text}")
+    if not args.expression_tags:
+        print(f"  Text: {text}")
 
     gen_kwargs = {
-        "text": args.text,
+        "text": text,
         "language": args.language,
         "ref_tokens": ref_tokens,
         "ref_text": ref_text,

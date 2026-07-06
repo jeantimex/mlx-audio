@@ -859,6 +859,67 @@ python scripts/omnivoice_clone.py \
 | `--skip-preprocess` | Skip preprocessing (use with saved files) |
 | `--num_steps` | Generation quality (default: 32, higher = better) |
 
+### Auto Expression Tags
+
+Automatically add expression tags to text based on content analysis. Tags are automatically converted to the correct format for each model.
+
+**Enable with `--expression-tags`:**
+
+```bash
+# Simple rule-based tagging (default, fast)
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-turbo-fp16 \
+  --text "That's so funny! Haha I can't believe it." \
+  --expression-tags \
+  --play
+
+# Using Claude API for better tagging (requires ANTHROPIC_API_KEY)
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-turbo-fp16 \
+  --text "I'm so frustrated with this situation!" \
+  --expression-tags \
+  --expression-provider anthropic \
+  --play
+
+# Using local MLX LLM
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-turbo-fp16 \
+  --text "Oh my god, that's amazing!" \
+  --expression-tags \
+  --expression-provider mlx \
+  --play
+```
+
+**Tag conversion between models:**
+
+Tags are automatically converted to match each model's supported format:
+
+| Input Tag | Chatterbox-Turbo | OmniVoice | Chatterbox |
+|-----------|------------------|-----------|------------|
+| `[laugh]` | `[laugh]` | `[laughter]` | *(removed)* |
+| `[happy]` | `[happy]` | *(removed)* | *(removed)* |
+| `[sigh]` | `[sigh]` | `[sigh]` | *(removed)* |
+| `[surprise]` | `[surprised]` | `[surprise-ah]` | *(removed)* |
+| `[whisper]` | `[whispering]` | *(removed)* | *(removed)* |
+
+**Standalone script for preprocessing:**
+
+```bash
+# Rule-based (fast, no dependencies)
+python scripts/add_expression_tags.py \
+  --text "Wow that's hilarious! I can't believe you did that." \
+  --provider simple
+
+# Output: Wow that's hilarious! [laugh] I can't believe you did that.
+
+# Pipe to TTS
+TEXT=$(python scripts/add_expression_tags.py -t "That's amazing! Haha" -p simple)
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-turbo-fp16 \
+  --text "$TEXT" \
+  --play
+```
+
 ## Web Interface & API Server
 
 MLX-Audio includes a modern web interface and OpenAI-compatible API.

@@ -178,6 +178,8 @@ def generate_audio(
     streaming_interval: float = 2.0,
     save: bool = False,
     use_zero_spk_emb: bool = False,
+    expression_tags: bool = False,
+    expression_provider: str = "simple",
     **kwargs,
 ) -> None:
     """
@@ -212,6 +214,9 @@ def generate_audio(
 
         if model is None:
             raise ValueError("Model path or model instance must be provided.")
+
+        # Store model path for expression tag detection
+        model_path_str = model if isinstance(model, str) else ""
 
         if isinstance(model, str):
             # Load model
@@ -340,6 +345,34 @@ def generate_audio(
                 ref_text = None
         elif ref_text_values:
             ref_text = _collapse_reference_list(ref_text_values)
+
+        # Process expression tags if enabled
+        if expression_tags:
+            from mlx_audio.tts.expression_tags import (
+                add_expression_tags,
+                supports_expression_tags,
+            )
+
+            # Get model name for tag conversion (prefer original path)
+            model_name = model_path_str
+            if not model_name:
+                model_name = getattr(model, "model_type", "") or ""
+            if not model_name and hasattr(model, "config"):
+                model_name = getattr(model.config, "model_type", "") or ""
+            if not model_name:
+                model_name = model.__class__.__name__.lower()
+
+            if supports_expression_tags(model_name):
+                original_text = text
+                text = add_expression_tags(
+                    text, model_name, provider=expression_provider
+                )
+                if verbose and text != original_text:
+                    print(f"\033[94mExpression tags added:\033[0m {text}")
+            elif verbose:
+                print(
+                    f"\033[93mWarning:\033[0m Expression tags not supported for this model"
+                )
 
         # Load AudioPlayer
         player = AudioPlayer(sample_rate=model.sample_rate) if play else None
@@ -662,6 +695,18 @@ def parse_args():
         type=float,
         default=1.1,
         help="Repetition penalty for the model",
+    )
+    parser.add_argument(
+        "--expression-tags",
+        action="store_true",
+        help="Auto-add expression tags to text (for Chatterbox-Turbo, OmniVoice)",
+    )
+    parser.add_argument(
+        "--expression-provider",
+        type=str,
+        choices=["simple", "anthropic", "mlx"],
+        default="simple",
+        help="Provider for expression tag insertion: simple (rule-based), anthropic (API), mlx (local LLM)",
     )
     parser.add_argument(
         "--stream",
