@@ -18,43 +18,70 @@ from typing import Optional
 # Canonical tags (model-agnostic) -> Model-specific tags
 TAG_MAPPINGS = {
     "fish-speech": {
-        # Sounds
+        # All Fish Speech S2 Pro supported tags
+        # Sounds/Actions
         "laugh": "[laughing]",
         "laughter": "[laughing]",
+        "laughing": "[laughing]",
         "chuckle": "[chuckle]",
+        "chuckling": "[chuckling]",
         "sigh": "[sigh]",
         "gasp": "[inhale]",
+        "inhale": "[inhale]",
+        "exhale": "[exhale]",
         "cough": "[clearing throat]",
-        "groan": "[moaning]",
-        "sniff": "[inhale]",
-        "shush": "[whisper]",
         "clear_throat": "[clearing throat]",
-        # Styles/Emotions
-        "happy": "[excited]",
-        "angry": "[angry]",
-        "dramatic": "[emphasis]",
-        "sarcastic": "[laughing tone]",
+        "clearing_throat": "[clearing throat]",
+        "groan": "[moaning]",
+        "moaning": "[moaning]",
+        "panting": "[panting]",
+        "tsk": "[tsk]",
+        "sniff": "[inhale]",
+        # Speech styles
         "whisper": "[whisper]",
         "whispering": "[whisper]",
+        "shout": "[shouting]",
+        "shouting": "[shouting]",
+        "scream": "[screaming]",
+        "screaming": "[screaming]",
+        "loud": "[loud]",
+        "volume_up": "[volume up]",
+        "volume_down": "[volume down]",
+        "low_volume": "[low volume]",
+        "low_voice": "[low voice]",
+        "singing": "[singing]",
+        "echo": "[echo]",
+        "accent": "[with strong accent]",
+        # Emotions
+        "happy": "[excited]",
+        "excited": "[excited]",
+        "excited_tone": "[excited tone]",
+        "angry": "[angry]",
+        "sad": "[sad]",
         "crying": "[sad]",
         "fear": "[shocked]",
+        "shocked": "[shocked]",
         "surprised": "[surprised]",
-        "narration": "[low voice]",
-        # Questions/Surprise
-        "question": "[surprised]",
-        "surprise": "[surprised]",
-        # Fish Speech specific
-        "pause": "[pause]",
-        "emphasis": "[emphasis]",
-        "excited": "[excited]",
-        "singing": "[singing]",
-        "shouting": "[shouting]",
-        "loud": "[loud]",
-        "exhale": "[exhale]",
-        "inhale": "[inhale]",
-        "panting": "[panting]",
         "delight": "[delight]",
+        # Emphasis/Pacing
+        "pause": "[pause]",
+        "short_pause": "[short pause]",
+        "emphasis": "[emphasis]",
+        "dramatic": "[emphasis]",
+        "interrupting": "[interrupting]",
+        # Tones
+        "sarcastic": "[laughing tone]",
+        "laughing_tone": "[laughing tone]",
+        "narration": "[low voice]",
+        # Special
+        "audience_laughter": "[audience laughter]",
         "dissatisfaction": "[angry]",
+        # Cute/spoiled manner (撒娇)
+        "cute": "[cute]",
+        "coquettish": "[cute]",
+        "spoiled": "[cute]",
+        "whiny": "[whiny]",
+        "pleading": "[pleading]",
     },
     "chatterbox-turbo": {
         # Sounds
@@ -466,6 +493,36 @@ def _add_tags_simple(text: str, temperature: float = 1.0) -> str:
         result
     )
 
+    # === Cute/Spoiled manner (撒娇) ===
+
+    # English cute/pleading patterns
+    result = prob_sub(
+        r'\b(pleaseee*|pleeeease|pwease|pretty please)\b',
+        r'[cute] \1',
+        result,
+        flags=re.IGNORECASE
+    )
+    result = prob_sub(
+        r'((?:i want|i wanna|gimme|can i have).{0,20}(?:please|pls))',
+        r'[cute] \1',
+        result,
+        flags=re.IGNORECASE
+    )
+
+    # Chinese cute/spoiled patterns (撒娇)
+    # 嘛/啦/呀/呢 endings with certain phrases
+    result = prob_sub(
+        r'(人家|讨厌啦|不要嘛|好不好嘛|拜托啦|求你了|你最好了|好嘛|啦~*|嘛~*|呀~*)',
+        r'[cute] \1',
+        result
+    )
+    # Whiny patterns
+    result = prob_sub(
+        r'(不嘛|不要啦|哎呀|我不管|你说嘛|好不好啦|可以嘛)',
+        r'[whiny] \1',
+        result
+    )
+
     # Clean up multiple spaces
     result = re.sub(r'\s+', ' ', result).strip()
 
@@ -477,7 +534,11 @@ def _get_llm_system_prompt(model_type: str, temperature: float = 1.0) -> str:
     if model_type == "omnivoice":
         tags = "[laughter], [sigh], [question-ah], [question-oh], [surprise-ah], [surprise-oh], [dissatisfaction-hnn]"
     elif model_type == "fish-speech":
-        tags = "[laughing], [chuckle], [sigh], [excited], [angry], [sad], [whisper], [shouting], [surprised], [pause], [emphasis], [singing], [inhale], [exhale], [delight]"
+        tags = """[laughing], [chuckle], [chuckling], [sigh], [inhale], [exhale], [clearing throat], [moaning], [panting], [tsk],
+[whisper], [shouting], [screaming], [loud], [volume up], [volume down], [low volume], [low voice], [singing], [echo],
+[excited], [excited tone], [angry], [sad], [shocked], [surprised], [delight],
+[pause], [short pause], [emphasis], [interrupting], [laughing tone],
+[audience laughter], [with strong accent], [cute], [whiny], [pleading]"""
     else:
         tags = "[laugh], [chuckle], [sigh], [gasp], [happy], [angry], [surprised], [whispering], [dramatic], [sarcastic]"
 
@@ -540,7 +601,7 @@ def _add_tags_mlx(text: str, model_type: str, model_name: Optional[str] = None, 
         return _add_tags_simple(text, temperature=temperature)
 
     if model_name is None:
-        model_name = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+        model_name = "mlx-community/gemma-3-4b-it-4bit"
 
     model, tokenizer = load(model_name)
 

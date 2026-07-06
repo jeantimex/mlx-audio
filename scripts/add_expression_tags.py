@@ -106,7 +106,7 @@ def add_tags_with_anthropic(text: str, model_type: str) -> str:
     return response.content[0].text.strip()
 
 
-def add_tags_with_mlx(text: str, model_type: str, model_name: str = "mlx-community/Llama-3.2-3B-Instruct-4bit") -> str:
+def add_tags_with_mlx(text: str, model_type: str, model_name: str = "mlx-community/gemma-3-4b-it-4bit") -> str:
     """Use local MLX model to add expression tags."""
     try:
         from mlx_lm import load, generate
@@ -181,7 +181,7 @@ def main():
     )
     parser.add_argument(
         "--llm-model",
-        default="mlx-community/Llama-3.2-3B-Instruct-4bit",
+        default="mlx-community/gemma-3-4b-it-4bit",
         help="MLX model to use (only for --provider mlx)",
     )
     args = parser.parse_args()
