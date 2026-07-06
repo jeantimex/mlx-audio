@@ -221,7 +221,7 @@ def add_expression_tags(
     target_model: str,
     provider: str = "simple",
     llm_model: Optional[str] = None,
-    temperature: float = 0.5,
+    temperature: float = 1.0,
 ) -> str:
     """
     Add expression tags to text for a specific TTS model.
@@ -260,7 +260,7 @@ def add_expression_tags(
     return convert_tags(tagged_text, target_model)
 
 
-def _add_tags_simple(text: str, temperature: float = 0.5) -> str:
+def _add_tags_simple(text: str, temperature: float = 1.0) -> str:
     """Simple rule-based tag insertion using canonical tags.
 
     Args:
@@ -281,27 +281,30 @@ def _add_tags_simple(text: str, temperature: float = 0.5) -> str:
 
     # === English patterns ===
 
-    # Laughing indicators
+    # Laughing sounds - REPLACE with tag (not append)
+    # haha, hehe, lol, lmao, rofl, emojis → [laugh]
     result = prob_sub(
-        r'(haha|hehe|lol|lmao|rofl|😂|🤣)',
+        r'(ha\s*ha+|he\s*he+|heh+|lol+|lmao|rofl|😂|🤣|🤭)',
+        r'[laugh]',
+        result,
+        flags=re.IGNORECASE
+    )
+    # Descriptive laughter - keep text, add tag
+    result = prob_sub(
+        r'(that\'s (so )?funny|hilarious|too funny)',
         r'\1 [laugh]',
         result,
         flags=re.IGNORECASE
     )
-    result = prob_sub(
-        r'([!?])\s*(that\'s (so )?funny|hilarious|too funny)',
-        r'\1 \2 [laugh]',
-        result,
-        flags=re.IGNORECASE
-    )
 
-    # Sighing indicators
+    # Sighing sounds - REPLACE with tag
     result = prob_sub(
-        r'\b(sigh|ugh)\b',
-        r'[sigh] \1',
+        r'\b(sigh+|ugh+)\b',
+        r'[sigh]',
         result,
         flags=re.IGNORECASE
     )
+    # Descriptive sighing - keep text, add tag
     result = prob_sub(
         r'(unfortunately|sadly|i\'m (so )?tired)',
         r'[sigh] \1',
@@ -309,10 +312,10 @@ def _add_tags_simple(text: str, temperature: float = 0.5) -> str:
         flags=re.IGNORECASE
     )
 
-    # Surprise indicators
+    # Surprise exclamations - keep text, add tag
     result = prob_sub(
-        r'\b(oh my god|omg|wow|no way)\b',
-        r'[surprise] \1 [gasp]',
+        r'\b(omg|wow+|whoa+|oh my god|no way|unbelievable)\b',
+        r'[surprise] \1',
         result,
         flags=re.IGNORECASE
     )
@@ -323,10 +326,10 @@ def _add_tags_simple(text: str, temperature: float = 0.5) -> str:
         flags=re.IGNORECASE
     )
 
-    # Question indicators
+    # Question sounds - REPLACE with tag
     result = prob_sub(
-        r'(huh\?|eh\?|what\?(?![!]))',
-        r'[question] \1',
+        r'\b(huh|hmm+|eh)\?',
+        r'[question]',
         result,
         flags=re.IGNORECASE
     )
@@ -338,70 +341,127 @@ def _add_tags_simple(text: str, temperature: float = 0.5) -> str:
         result
     )
 
-    # Whisper indicators
+    # Whisper sounds - REPLACE with tag
     result = prob_sub(
-        r'\b(shh+|psst|quietly)\b',
+        r'\b(shh+|psst+)\b',
+        r'[whisper]',
+        result,
+        flags=re.IGNORECASE
+    )
+    # Descriptive whisper - keep text, add tag
+    result = prob_sub(
+        r'\b(quietly|softly)\b',
         r'[whisper] \1',
         result,
         flags=re.IGNORECASE
     )
 
-    # Happy indicators
+    # Happy sounds - REPLACE with tag
     result = prob_sub(
-        r'\b(yay|hooray|wonderful|amazing|fantastic)\b',
+        r'\b(yay+|woohoo+|woo+)\b',
+        r'[happy]',
+        result,
+        flags=re.IGNORECASE
+    )
+    # Descriptive happy - keep text, add tag
+    result = prob_sub(
+        r'\b(wonderful|amazing|fantastic|awesome)\b',
         r'[happy] \1',
         result,
         flags=re.IGNORECASE
     )
 
     # === Chinese patterns ===
+    # Onomatopoeia are REPLACED with tags, descriptive expressions get tags added
 
-    # Laughing indicators (哈哈, 嘻嘻, 呵呵, 笑死)
+    # Laughing sounds - REPLACE with tag
+    # 哈哈/嘻嘻/呵呵/噗 = laughter sounds → [laugh]
     result = prob_sub(
-        r'(哈哈+|嘻嘻+|呵呵+|笑死了?|太好笑了)',
+        r'(哈哈+|嘻嘻+|呵呵+|噗+|hhh+)',
+        r'[laugh]',
+        result
+    )
+    # Descriptive laughter - keep text, add tag
+    result = prob_sub(
+        r'(笑死了?|太好笑了)',
         r'\1 [laugh]',
         result
     )
 
-    # Happy indicators (开心, 高兴, 太棒了, 太好了, 真好, 太爽了)
-    # Use word boundary-like pattern to avoid partial matches
+    # Happy sounds - REPLACE with tag
     result = prob_sub(
-        r'(真?他妈的?开心|真?开心|好开心|很开心|超开心|太开心了?|好高兴|很高兴|真高兴|太高兴了?|太棒了|太好了|真好|太爽了|好爽|爽死了?|耶+)',
+        r'(耶+|哇+塞|哇+哦+)',
+        r'[happy]',
+        result
+    )
+    # Descriptive happy - keep text, add tag
+    result = prob_sub(
+        r'(真?他妈的?开心|真?开心|好开心|很开心|超开心|太开心了?|好高兴|很高兴|真高兴|太高兴了?|太棒了|太好了|真好|太爽了|好爽|爽死了?)',
         r'[happy] \1',
         result
     )
 
-    # Sighing indicators (唉, 哎, 算了, 无奈, 累)
+    # Sighing sounds - REPLACE with tag
     result = prob_sub(
-        r'(唉+|哎+|算了|无奈|好累|真累|太累了|累死了|心累)',
+        r'(唉+|哎+|呃+)',
+        r'[sigh]',
+        result
+    )
+    # Descriptive sighing - keep text, add tag
+    result = prob_sub(
+        r'(算了|无奈|好累|真累|太累了|累死了|心累)',
         r'[sigh] \1',
         result
     )
 
-    # Surprise indicators (哇, 天哪, 我的天, 卧槽, 靠, 厉害, 神奇)
+    # Surprise sounds - REPLACE with tag
     result = prob_sub(
-        r'(哇+塞?|天哪|我的天|天啊|我靠|卧槽|牛逼|太厉害了?|不可思议|很神奇|太神奇了?|真神奇|难以置信|不敢相信)',
+        r'(哇+(?!塞|哦)|我靠|卧槽|我去|天啊*|我滴妈)',
+        r'[surprise]',
+        result
+    )
+    # Descriptive surprise - keep text, add tag
+    result = prob_sub(
+        r'(天哪|我的天|太厉害了?|不可思议|很神奇|太神奇了?|真神奇|难以置信|不敢相信|牛逼)',
         r'[surprise] \1',
         result
     )
 
-    # Anger indicators (气死, 烦死, 讨厌, 该死)
+    # Anger sounds - REPLACE with tag
+    result = prob_sub(
+        r'(靠+|草+|妈的)',
+        r'[angry]',
+        result
+    )
+    # Descriptive anger - keep text, add tag
     result = prob_sub(
         r'(气死.{0,2}了?|烦死.{0,2}了?|讨厌|该死|真烦|好烦|太烦了|受不了|忍不了)',
         r'[angry] \1',
         result
     )
 
-    # Question indicators (啊?, 吗?, 呢?, 什么)
+    # Question sounds - REPLACE with tag
+    result = prob_sub(
+        r'(啊\?|嗯\?|哈\?)',
+        r'[question]',
+        result
+    )
+    # Descriptive question - keep text, add tag
     result = prob_sub(
         r'(真的吗|是吗|什么\?|啥\?|为什么|怎么回事)',
         r'[question] \1',
         result
     )
 
-    # Dissatisfaction (哼, 切, 无语)
+    # Dissatisfaction sounds - REPLACE with tag
     result = prob_sub(
-        r'(哼+|切+|无语|服了|醉了)',
+        r'(哼+|切+|tsk+)',
+        r'[dissatisfaction]',
+        result
+    )
+    # Descriptive dissatisfaction - keep text, add tag
+    result = prob_sub(
+        r'(无语|服了|醉了)',
         r'[dissatisfaction] \1',
         result
     )
@@ -412,7 +472,7 @@ def _add_tags_simple(text: str, temperature: float = 0.5) -> str:
     return result
 
 
-def _get_llm_system_prompt(model_type: str, temperature: float = 0.5) -> str:
+def _get_llm_system_prompt(model_type: str, temperature: float = 1.0) -> str:
     """Get system prompt for LLM tag insertion."""
     if model_type == "omnivoice":
         tags = "[laughter], [sigh], [question-ah], [question-oh], [surprise-ah], [surprise-oh], [dissatisfaction-hnn]"
@@ -448,7 +508,7 @@ Examples:
 """
 
 
-def _add_tags_anthropic(text: str, model_type: str, temperature: float = 0.5) -> str:
+def _add_tags_anthropic(text: str, model_type: str, temperature: float = 1.0) -> str:
     """Use Anthropic API to add expression tags."""
     import os
     try:
@@ -472,7 +532,7 @@ def _add_tags_anthropic(text: str, model_type: str, temperature: float = 0.5) ->
     return response.content[0].text.strip()
 
 
-def _add_tags_mlx(text: str, model_type: str, model_name: Optional[str] = None, temperature: float = 0.5) -> str:
+def _add_tags_mlx(text: str, model_type: str, model_name: Optional[str] = None, temperature: float = 1.0) -> str:
     """Use local MLX model to add expression tags."""
     try:
         from mlx_lm import load, generate

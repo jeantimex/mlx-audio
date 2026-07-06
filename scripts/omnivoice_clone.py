@@ -103,8 +103,8 @@ def main():
     parser.add_argument(
         "--expression-tags-temperature",
         type=float,
-        default=0.5,
-        help="Expression tag density (0.0 = none, 1.0 = all matches). Default 0.5.",
+        default=1.0,
+        help="Expression tag density (0.0 = none, 1.0 = all matches). Default 1.0.",
     )
     args = parser.parse_args()
 
