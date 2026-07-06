@@ -593,7 +593,7 @@ save_audio(enhanced, "clean.wav", 48000)
 
 ## Voice Cloning
 
-Many TTS models support zero-shot voice cloning using a reference audio sample. This section covers how to prepare reference audio and use it for voice cloning.
+Many TTS models support zero-shot voice cloning using a reference audio sample. This section covers how to prepare reference audio, create reusable voice profiles, and use them for voice cloning.
 
 ### Preparing Reference Audio
 
@@ -601,7 +601,7 @@ Use the `generate_reference.py` script to create a reference audio clip from a l
 
 ```bash
 # Install dependencies
-pip install faster-whisper yt-dlp
+uv pip install faster-whisper yt-dlp
 pipx install 'audio-separator[cpu]'  # for voice isolation (optional)
 
 # From a local audio file
@@ -616,14 +616,62 @@ python scripts/generate_reference.py audio.wav -s 0:10 -e 0:25 -o my_voice.wav -
 ```
 
 **Options:**
-- `--start`, `-s`: Start time (e.g., `1:30` or `90`)
-- `--end`, `-e`: End time (e.g., `1:45` or `105`)
-- `--output`, `-o`: Output filename (default: `reference.wav`)
-- `--isolate-voice`, `-i`: Remove background music/noise using audio-separator
-- `--transcribe`, `-t`: Generate reference text using faster-whisper
-- `--whisper-model`: Whisper model size (`tiny`, `base`, `small`, `medium`, `large-v3`)
+| Option | Description |
+|--------|-------------|
+| `--start`, `-s` | Start time (e.g., `1:30` or `90`) |
+| `--end`, `-e` | End time (e.g., `1:45` or `105`) |
+| `--output`, `-o` | Output filename (default: `reference.wav`) |
+| `--isolate-voice`, `-i` | Remove background music/noise using audio-separator |
+| `--transcribe`, `-t` | Generate reference text using faster-whisper |
+| `--whisper-model` | Whisper model size (`tiny`, `base`, `small`, `medium`, `large-v3`) |
 
 The script outputs a WAV file and optionally a `.txt` file with the transcript.
+
+### Voice Profiles
+
+Voice profiles pre-compute speaker embeddings so you don't need to process reference audio every time. This makes generation faster and allows you to reuse voices easily.
+
+**Create a voice profile:**
+
+```bash
+# For Chatterbox-Turbo (reference audio must be >5 seconds)
+python scripts/create_voice_profile.py reference.wav -o my_voice.profile
+
+# For regular Chatterbox (reference audio must be >6 seconds)
+python scripts/create_voice_profile.py reference.wav \
+  --model mlx-community/chatterbox-fp16 \
+  --exaggeration 0.5 \
+  -o my_voice.profile
+
+# Test the profile immediately
+python scripts/create_voice_profile.py reference.wav -o my_voice.profile --test
+```
+
+**Use a voice profile:**
+
+```bash
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-turbo-fp16 \
+  --profile my_voice.profile \
+  --text "This uses my saved voice profile!" \
+  --play
+```
+
+**Python API:**
+
+```python
+from mlx_audio.tts.utils import load_model
+from mlx_audio.tts.models.chatterbox_turbo.chatterbox_turbo import Conditionals
+
+# Load model and voice profile
+model = load_model("mlx-community/chatterbox-turbo-fp16")
+model._conds = Conditionals.load("my_voice.profile")
+
+# Generate speech (no reference audio processing needed)
+for result in model.generate("Hello from my saved voice!"):
+    # result.audio contains the waveform
+    pass
+```
 
 ### Chatterbox-Turbo
 
@@ -648,6 +696,16 @@ python -m mlx_audio.tts.generate \
   --play
 ```
 
+**With voice profile** (faster, no audio processing):
+
+```bash
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-turbo-fp16 \
+  --profile my_voice.profile \
+  --text "Using pre-computed voice profile!" \
+  --play
+```
+
 **Paralinguistic tags** for expressive speech:
 
 ```bash
@@ -657,9 +715,37 @@ python -m mlx_audio.tts.generate \
   --play
 ```
 
-Supported tags:
-- **Sounds:** `[laugh]`, `[chuckle]`, `[sigh]`, `[gasp]`, `[cough]`, `[groan]`, `[sniff]`, `[shush]`, `[clear throat]`
-- **Styles:** `[happy]`, `[angry]`, `[dramatic]`, `[sarcastic]`, `[whispering]`, `[crying]`, `[fear]`, `[surprised]`, `[narration]`
+**Supported tags:**
+
+| Type | Tags |
+|------|------|
+| **Sounds** | `[laugh]`, `[chuckle]`, `[sigh]`, `[gasp]`, `[cough]`, `[groan]`, `[sniff]`, `[shush]`, `[clear throat]` |
+| **Styles** | `[happy]`, `[angry]`, `[dramatic]`, `[sarcastic]`, `[whispering]`, `[crying]`, `[fear]`, `[surprised]`, `[narration]` |
+
+### Chatterbox (Multilingual)
+
+Regular Chatterbox supports 16 languages and voice cloning with emotion control.
+
+**Voice cloning with emotion:**
+
+```bash
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-fp16 \
+  --text "This is expressive speech!" \
+  --ref_audio reference.wav \
+  --exaggeration 0.7 \
+  --play
+```
+
+**With voice profile:**
+
+```bash
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-fp16 \
+  --profile my_voice.profile \
+  --text "Using my saved multilingual voice!" \
+  --play
+```
 
 ## Web Interface & API Server
 

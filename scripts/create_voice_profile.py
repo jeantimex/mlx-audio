@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-Create a voice profile from reference audio for Chatterbox-Turbo.
+Create a voice profile from reference audio for Chatterbox or Chatterbox-Turbo.
 
 Pre-computes speaker embeddings and conditionals so you don't need to
 process the reference audio every time you generate speech.
 
 Usage:
-    # Create a voice profile
+    # Create a voice profile for Chatterbox-Turbo
     python scripts/create_voice_profile.py reference.wav -o my_voice.profile
+
+    # Create a voice profile for regular Chatterbox
+    python scripts/create_voice_profile.py reference.wav --model mlx-community/chatterbox-fp16
 
     # Use the profile for TTS (see example at the end)
 
 Requirements:
-    - Reference audio must be >5 seconds
+    - Reference audio must be >5 seconds (Turbo) or >6 seconds (regular)
     - Clear speech with minimal background noise
 """
 
@@ -23,7 +26,7 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Create a voice profile from reference audio for Chatterbox-Turbo"
+        description="Create a voice profile from reference audio for Chatterbox models"
     )
     parser.add_argument(
         "ref_audio",
@@ -39,6 +42,12 @@ def main():
         "--model",
         default="mlx-community/chatterbox-turbo-fp16",
         help="Model to use (default: mlx-community/chatterbox-turbo-fp16)",
+    )
+    parser.add_argument(
+        "--exaggeration",
+        type=float,
+        default=0.5,
+        help="Emotion exaggeration factor 0-1 (default: 0.5, only for regular Chatterbox)",
     )
     parser.add_argument(
         "--test",
@@ -64,6 +73,9 @@ def main():
     else:
         output_path = ref_audio_path.with_suffix(".profile")
 
+    # Detect model type
+    is_turbo = "turbo" in args.model.lower()
+
     print(f"Loading model: {args.model}")
     from mlx_audio.tts.utils import load_model
 
@@ -75,11 +87,19 @@ def main():
     print("  Computing S3Gen conditionals...")
 
     # Prepare conditionals from reference audio
-    model.prepare_conditionals(
-        ref_audio=str(ref_audio_path),
-        exaggeration=0.0,
-        norm_loudness=True,
-    )
+    if is_turbo:
+        model.prepare_conditionals(
+            ref_audio=str(ref_audio_path),
+            exaggeration=0.0,
+            norm_loudness=True,
+        )
+    else:
+        # Regular Chatterbox
+        model._conds = model.prepare_conditionals(
+            ref_wav=str(ref_audio_path),
+            ref_sr=model.sample_rate,
+            exaggeration=args.exaggeration,
+        )
 
     # Save the profile
     model._conds.save(output_path)
@@ -88,7 +108,12 @@ def main():
     # Test if requested
     if args.test:
         print(f"\nTesting profile with: \"{args.test_text}\"")
-        from mlx_audio.tts.models.chatterbox_turbo.chatterbox_turbo import Conditionals
+
+        # Load the appropriate Conditionals class
+        if is_turbo:
+            from mlx_audio.tts.models.chatterbox_turbo.chatterbox_turbo import Conditionals
+        else:
+            from mlx_audio.tts.models.chatterbox.chatterbox import Conditionals
 
         # Reload to verify it works
         model._conds = Conditionals.load(output_path)
@@ -108,16 +133,12 @@ def main():
     print("Usage with the voice profile:")
     print("=" * 60)
     print(f"""
-# Python API
-from mlx_audio.tts.utils import load_model
-from mlx_audio.tts.models.chatterbox_turbo.chatterbox_turbo import Conditionals
-
-model = load_model("{args.model}")
-model._conds = Conditionals.load("{output_path}")
-
-for result in model.generate("Your text here"):
-    # result.audio contains the waveform
-    pass
+# Command line
+python -m mlx_audio.tts.generate \\
+  --model {args.model} \\
+  --profile {output_path} \\
+  --text "Your text here" \\
+  --play
 """)
 
 

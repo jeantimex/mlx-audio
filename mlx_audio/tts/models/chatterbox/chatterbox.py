@@ -128,6 +128,22 @@ class Conditionals:
     t3: T3Cond
     gen: dict
 
+    def save(self, fpath: Path):
+        """Save conditionals to file."""
+        import pickle
+
+        with open(fpath, "wb") as f:
+            pickle.dump({"t3": self.t3, "gen": self.gen}, f)
+
+    @classmethod
+    def load(cls, fpath: Path) -> "Conditionals":
+        """Load conditionals from file."""
+        import pickle
+
+        with open(fpath, "rb") as f:
+            data = pickle.load(f)
+        return cls(data["t3"], data["gen"])
+
 
 class Model(nn.Module):
     """

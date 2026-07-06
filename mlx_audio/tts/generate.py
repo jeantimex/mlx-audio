@@ -217,24 +217,48 @@ def generate_audio(
             # Load model
             model = load_model(model_path=model)
 
-        # Load voice profile if provided (for Chatterbox-Turbo and similar models)
+        # Load voice profile if provided (for Chatterbox and Chatterbox-Turbo models)
         if profile is not None:
             profile_path = Path(profile)
             if not profile_path.exists():
                 raise FileNotFoundError(f"Voice profile not found: {profile_path}")
-            try:
-                from mlx_audio.tts.models.chatterbox_turbo.chatterbox_turbo import (
-                    Conditionals,
+
+            # Try to detect model type and load appropriate Conditionals
+            model_type = getattr(model, "model_type", None)
+            loaded = False
+
+            # Try Chatterbox-Turbo first
+            if not loaded:
+                try:
+                    from mlx_audio.tts.models.chatterbox_turbo.chatterbox_turbo import (
+                        Conditionals as TurboConditionals,
+                    )
+
+                    model._conds = TurboConditionals.load(profile_path)
+                    loaded = True
+                except Exception:
+                    pass
+
+            # Try regular Chatterbox
+            if not loaded:
+                try:
+                    from mlx_audio.tts.models.chatterbox.chatterbox import (
+                        Conditionals as ChatterboxConditionals,
+                    )
+
+                    model._conds = ChatterboxConditionals.load(profile_path)
+                    loaded = True
+                except Exception:
+                    pass
+
+            if not loaded:
+                raise ValueError(
+                    f"Failed to load voice profile from {profile_path}. "
+                    "Profiles are supported for Chatterbox and Chatterbox-Turbo models."
                 )
 
-                model._conds = Conditionals.load(profile_path)
-                if verbose:
-                    print(f"\033[94mVoice profile:\033[0m {profile_path}")
-            except Exception as e:
-                raise ValueError(
-                    f"Failed to load voice profile: {e}. "
-                    "Profiles are currently supported for Chatterbox-Turbo models."
-                )
+            if verbose:
+                print(f"\033[94mVoice profile:\033[0m {profile_path}")
 
         ref_audio_values = _as_reference_list(ref_audio)
         ref_text_values = _as_reference_list(ref_text)
