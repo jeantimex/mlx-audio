@@ -840,9 +840,11 @@ python scripts/omnivoice_clone.py \
 |-----|-------------|
 | `[laughter]` | Laughing |
 | `[sigh]` | Sighing |
-| `[question-ah]`, `[question-oh]` | Question interjections |
-| `[surprise-ah]`, `[surprise-oh]` | Surprise interjections |
-| `[dissatisfaction-hnn]` | Dissatisfaction |
+| `[confirmation-en]` | English confirmation sound |
+| `[question-en]` | English question intonation |
+| `[question-ah]`, `[question-oh]`, `[question-ei]`, `[question-yi]` | Question interjections |
+| `[surprise-ah]`, `[surprise-oh]`, `[surprise-wa]`, `[surprise-yo]` | Surprise interjections |
+| `[dissatisfaction-hnn]` | "Hnn" dissatisfaction |
 
 **Options:**
 
