@@ -23,50 +23,88 @@ Usage:
 
 import argparse
 import re
+import signal
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
 
+# Global flag for interruption
+_interrupted = threading.Event()
 
-def record_audio(sample_rate: int = 16000, silence_threshold: float = 0.01,
-                 silence_duration: float = 1.5, max_duration: float = 30.0) -> np.ndarray:
+def _signal_handler(signum, frame):
+    """Handle Ctrl+C gracefully."""
+    _interrupted.set()
+    print("\n\n👋 Interrupted! Exiting...")
+    sys.exit(0)
+
+# Register signal handler
+signal.signal(signal.SIGINT, _signal_handler)
+
+
+def record_audio(sample_rate: int = 16000, silence_threshold: float = 0.012,
+                 silence_duration: float = 1.2, max_duration: float = 30.0) -> np.ndarray:
     """Record audio from microphone until silence is detected."""
     print("\n🎤 Listening... (speak now, pause to finish)")
 
-    chunk_duration = 0.1  # 100ms chunks
+    chunk_duration = 0.05  # 50ms chunks for faster response
     chunk_samples = int(sample_rate * chunk_duration)
     max_samples = int(sample_rate * max_duration)
-    silence_samples = int(sample_rate * silence_duration)
+    silence_chunks_needed = int(silence_duration / chunk_duration)
 
     audio_chunks = []
     silent_chunks = 0
     has_speech = False
+    speech_chunks = 0
 
-    with sd.InputStream(samplerate=sample_rate, channels=1, dtype='float32') as stream:
-        while True:
-            chunk, _ = stream.read(chunk_samples)
-            audio_chunks.append(chunk.copy())
+    try:
+        with sd.InputStream(samplerate=sample_rate, channels=1, dtype='float32') as stream:
+            # Calibrate noise floor (first 0.3s)
+            calibration_chunks = int(0.3 / chunk_duration)
+            noise_samples = []
+            for _ in range(calibration_chunks):
+                if _interrupted.is_set():
+                    raise KeyboardInterrupt()
+                chunk, _ = stream.read(chunk_samples)
+                rms = np.sqrt(np.mean(chunk ** 2))
+                noise_samples.append(rms)
+            noise_floor = np.mean(noise_samples) * 1.8  # Higher multiplier
+            dynamic_threshold = max(silence_threshold, noise_floor)
 
-            # Calculate RMS energy
-            rms = np.sqrt(np.mean(chunk ** 2))
+            while not _interrupted.is_set():
+                chunk, _ = stream.read(chunk_samples)
+                audio_chunks.append(chunk.copy())
 
-            if rms > silence_threshold:
-                has_speech = True
-                silent_chunks = 0
-            else:
-                silent_chunks += 1
+                # Calculate RMS energy
+                rms = np.sqrt(np.mean(chunk ** 2))
 
-            # Stop if silence detected after speech
-            if has_speech and silent_chunks * chunk_samples >= silence_samples:
-                break
+                if rms > dynamic_threshold:
+                    has_speech = True
+                    speech_chunks += 1
+                    silent_chunks = 0
+                else:
+                    silent_chunks += 1
 
-            # Stop if max duration reached
-            if len(audio_chunks) * chunk_samples >= max_samples:
-                print("⏱️  Max duration reached")
-                break
+                # Require at least 1 second of speech before allowing stop
+                min_speech_time = 1.0
+                current_speech_time = speech_chunks * chunk_duration
+                if has_speech and current_speech_time >= min_speech_time and silent_chunks >= silence_chunks_needed:
+                    break
+
+                # Stop if max duration reached
+                if len(audio_chunks) * chunk_samples >= max_samples:
+                    print("⏱️  Max duration reached")
+                    break
+    except KeyboardInterrupt:
+        print("\n⚠️  Recording interrupted")
+        if not audio_chunks:
+            return np.array([], dtype=np.float32)
+
+    if not audio_chunks:
+        return np.array([], dtype=np.float32)
 
     audio = np.concatenate(audio_chunks, axis=0).flatten()
     duration = len(audio) / sample_rate
@@ -76,19 +114,18 @@ def record_audio(sample_rate: int = 16000, silence_threshold: float = 0.01,
 
 
 def record_and_transcribe_streaming(stt_model, sample_rate: int = 16000,
-                                    silence_threshold: float = 0.01,
-                                    silence_duration: float = 1.5,
+                                    silence_threshold: float = 0.012,
+                                    silence_duration: float = 1.2,
                                     max_duration: float = 30.0) -> str:
     """Record audio and transcribe in real-time using Voxtral streaming."""
-    import threading
     from mlx_audio.stt.models.voxtral_realtime.streaming import StreamingAudioSource
 
     print("\n🎤 Listening... (speak now, pause to finish)")
 
-    chunk_duration = 0.1  # 100ms chunks
+    chunk_duration = 0.05  # 50ms chunks for faster response
     chunk_samples = int(sample_rate * chunk_duration)
     max_samples = int(sample_rate * max_duration)
-    silence_samples = int(sample_rate * silence_duration)
+    silence_chunks_needed = int(silence_duration / chunk_duration)
 
     source = StreamingAudioSource()
     transcription_result = []
@@ -98,11 +135,14 @@ def record_and_transcribe_streaming(stt_model, sample_rate: int = 16000,
         """Background thread to process transcription."""
         try:
             for delta in stt_model.generate_streaming(source):
+                if _interrupted.is_set():
+                    break
                 if delta:
                     transcription_result.append(delta)
-                    print(f"\r   Hearing: {' '.join(transcription_result)}", end="", flush=True)
+                    print(f"\r   Hearing: {''.join(transcription_result)}", end="", flush=True)
         except Exception as e:
-            print(f"\n⚠️  Transcription error: {e}")
+            if not _interrupted.is_set():
+                print(f"\n⚠️  Transcription error: {e}")
         finally:
             transcription_done.set()
 
@@ -113,33 +153,54 @@ def record_and_transcribe_streaming(stt_model, sample_rate: int = 16000,
     # Record audio and feed to transcriber
     silent_chunks = 0
     has_speech = False
+    speech_chunks = 0
     total_samples = 0
 
-    with sd.InputStream(samplerate=sample_rate, channels=1, dtype='float32') as stream:
-        while True:
-            chunk, _ = stream.read(chunk_samples)
-            total_samples += chunk_samples
+    try:
+        with sd.InputStream(samplerate=sample_rate, channels=1, dtype='float32') as stream:
+            # Calibrate noise floor (first 0.3s)
+            calibration_chunks = int(0.3 / chunk_duration)
+            noise_samples = []
+            for _ in range(calibration_chunks):
+                if _interrupted.is_set():
+                    raise KeyboardInterrupt()
+                chunk, _ = stream.read(chunk_samples)
+                source.append(chunk.flatten())
+                total_samples += chunk_samples
+                rms = np.sqrt(np.mean(chunk ** 2))
+                noise_samples.append(rms)
+            noise_floor = np.mean(noise_samples) * 1.8
+            dynamic_threshold = max(silence_threshold, noise_floor)
 
-            # Feed to streaming transcriber
-            source.append(chunk.flatten())
+            while not _interrupted.is_set():
+                chunk, _ = stream.read(chunk_samples)
+                total_samples += chunk_samples
 
-            # Calculate RMS energy
-            rms = np.sqrt(np.mean(chunk ** 2))
+                # Feed to streaming transcriber
+                source.append(chunk.flatten())
 
-            if rms > silence_threshold:
-                has_speech = True
-                silent_chunks = 0
-            else:
-                silent_chunks += 1
+                # Calculate RMS energy
+                rms = np.sqrt(np.mean(chunk ** 2))
 
-            # Stop if silence detected after speech
-            if has_speech and silent_chunks * chunk_samples >= silence_samples:
-                break
+                if rms > dynamic_threshold:
+                    has_speech = True
+                    speech_chunks += 1
+                    silent_chunks = 0
+                else:
+                    silent_chunks += 1
 
-            # Stop if max duration reached
-            if total_samples >= max_samples:
-                print("\n⏱️  Max duration reached")
-                break
+                # Only stop after enough speech AND enough silence
+                min_speech_time = 1.0
+                current_speech_time = speech_chunks * chunk_duration
+                if has_speech and current_speech_time >= min_speech_time and silent_chunks >= silence_chunks_needed:
+                    break
+
+                # Stop if max duration reached
+                if total_samples >= max_samples:
+                    print("\n⏱️  Max duration reached")
+                    break
+    except KeyboardInterrupt:
+        print("\n⚠️  Recording interrupted")
 
     # Signal end of audio
     source.close()
@@ -215,10 +276,82 @@ EXPRESSION_TAGS_PROMPT_ZH = """
 """
 
 
+def generate_response_streaming(user_input: str, conversation: list, llm_model, llm_tokenizer,
+                                system_prompt: str, expression_mode: str = "simple",
+                                language: str = "auto"):
+    """Generate LLM response with streaming, yielding sentences as they complete."""
+    from mlx_lm import stream_generate
+
+    print("🤔 Thinking...", end="", flush=True)
+
+    # Add expression tags instruction to system prompt if using LLM mode
+    full_system_prompt = system_prompt
+    if expression_mode == "llm":
+        if language == "zh":
+            full_system_prompt += "\n" + EXPRESSION_TAGS_PROMPT_ZH
+        else:
+            full_system_prompt += "\n" + EXPRESSION_TAGS_PROMPT
+
+    # Build conversation
+    messages = [{"role": "system", "content": full_system_prompt}]
+    messages.extend(conversation)
+    messages.append({"role": "user", "content": user_input})
+
+    # Format prompt
+    prompt = llm_tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
+    # Stream tokens and yield complete sentences
+    buffer = ""
+    # Sentence endings for different languages
+    sentence_ends = [".", "!", "?", "。", "！", "？", "~", "～"]
+
+    for token_result in stream_generate(
+        llm_model, llm_tokenizer,
+        prompt=prompt,
+        max_tokens=128,
+    ):
+        # Use .text which is the decoded token string
+        token_text = token_result.text
+        buffer += token_text
+
+        # Check for end tokens and stop
+        if any(end in buffer for end in ["<end_of_turn>", "</s>", "<|endoftext|>", "<|im_end|>"]):
+            for end_token in ["<end_of_turn>", "</s>", "<|endoftext|>", "<|im_end|>"]:
+                buffer = buffer.split(end_token)[0]
+            if buffer.strip():
+                yield buffer.strip()
+            break
+
+        # Check if we have a complete sentence
+        for end_char in sentence_ends:
+            if end_char in buffer:
+                # Split at the sentence boundary
+                parts = buffer.split(end_char, 1)
+                sentence = parts[0] + end_char
+                buffer = parts[1] if len(parts) > 1 else ""
+
+                sentence = sentence.strip()
+                if sentence:
+                    yield sentence
+                break
+
+    # Yield any remaining text
+    buffer = buffer.strip()
+    # Clean up remaining buffer
+    for end_token in ["<end_of_turn>", "</s>", "<|endoftext|>", "<|im_end|>"]:
+        buffer = buffer.split(end_token)[0]
+    buffer = ''.join(char for char in buffer if char.isprintable() or char in '\n ')
+    buffer = re.sub(r'(\[[\w]+\]\s*){3,}', '', buffer)
+    if buffer.strip():
+        yield buffer.strip()
+
+
 def generate_response(user_input: str, conversation: list, llm_model, llm_tokenizer,
                      system_prompt: str, expression_mode: str = "simple",
                      language: str = "auto") -> str:
-    """Generate LLM response."""
+    """Generate LLM response (non-streaming)."""
     from mlx_lm import generate
 
     print("🤔 Thinking...")
@@ -276,6 +409,104 @@ def generate_response(user_input: str, conversation: list, llm_model, llm_tokeni
     print(f"   Assistant: \"{response}\"")
 
     return response
+
+
+def generate_and_speak_streaming(user_input: str, conversation: list,
+                                  llm_model, llm_tokenizer, tts_model,
+                                  system_prompt: str, expression_mode: str = "simple",
+                                  language: str = "auto", ref_audio=None, ref_text=None) -> str:
+    """Stream LLM → TTS → Audio. TTS runs on main thread (MLX requirement)."""
+    from queue import Queue, Empty
+
+    # Queue for audio playback
+    audio_queue = Queue()
+    playback_done = threading.Event()
+
+    def playback_thread():
+        """Play audio chunks as they arrive (background thread)."""
+        stream = None
+        try:
+            while True:
+                try:
+                    chunk = audio_queue.get(timeout=0.1)
+                    if chunk is None:
+                        break
+
+                    audio_data, sr = chunk
+
+                    # Initialize stream on first chunk
+                    if stream is None:
+                        stream = sd.OutputStream(
+                            samplerate=sr,
+                            channels=1,
+                            dtype='float32'
+                        )
+                        stream.start()
+
+                    # Play this chunk
+                    stream.write(audio_data.astype(np.float32))
+
+                except Empty:
+                    continue
+        finally:
+            if stream is not None:
+                stream.stop()
+                stream.close()
+            playback_done.set()
+
+    # Start playback thread
+    t_play = threading.Thread(target=playback_thread, daemon=True)
+    t_play.start()
+
+    # Generate LLM response and TTS on main thread (MLX requirement)
+    full_response = []
+    first_sentence = True
+    first_audio = True
+
+    for sentence in generate_response_streaming(
+        user_input, conversation, llm_model, llm_tokenizer,
+        system_prompt, expression_mode, language
+    ):
+        if not sentence or _interrupted.is_set():
+            continue
+
+        full_response.append(sentence)
+
+        if first_sentence:
+            print()  # New line after "Thinking..."
+            first_sentence = False
+
+        print(f"   📝 {sentence}")
+
+        # Add expression tags
+        text_to_speak = sentence
+        if expression_mode == "simple":
+            from mlx_audio.tts.expression_tags import add_expression_tags
+            text_to_speak = add_expression_tags(sentence, "fish-audio-s2-pro", "simple")
+
+        # Generate TTS for this sentence (main thread)
+        gen_kwargs = {"text": text_to_speak, "chunk_length": 50}
+        if ref_audio is not None:
+            gen_kwargs["ref_audio"] = ref_audio
+        if ref_text is not None:
+            gen_kwargs["ref_text"] = ref_text
+
+        for result in tts_model.generate(**gen_kwargs):
+            if _interrupted.is_set():
+                break
+            if result.audio is not None and len(result.audio) > 0:
+                audio_data = np.array(result.audio).flatten()
+                sr = result.sample_rate if hasattr(result, 'sample_rate') else 44100
+                audio_queue.put((audio_data, sr))
+                if first_audio:
+                    first_audio = False
+                    print("🔊 Speaking...")
+
+    # Signal end of audio and wait for playback
+    audio_queue.put(None)
+    playback_done.wait(timeout=30)
+
+    return " ".join(full_response)
 
 
 def speak_response(text: str, tts_model, ref_audio=None, ref_text=None,
@@ -527,13 +758,30 @@ def main():
                 )
                 break
 
-            # Generate response
-            response = generate_response(
-                user_text, conversation, llm_model, llm_tokenizer,
-                args.system_prompt,
-                expression_mode=expr_mode,
-                language=args.language
-            )
+            # Generate and speak response
+            if args.stream:
+                # Streaming mode: LLM → TTS → play in pipeline
+                response = generate_and_speak_streaming(
+                    user_text, conversation, llm_model, llm_tokenizer, tts_model,
+                    args.system_prompt,
+                    expression_mode=expr_mode,
+                    language=args.language,
+                    ref_audio=ref_audio,
+                    ref_text=ref_text
+                )
+            else:
+                # Non-streaming: generate full response, then speak
+                response = generate_response(
+                    user_text, conversation, llm_model, llm_tokenizer,
+                    args.system_prompt,
+                    expression_mode=expr_mode,
+                    language=args.language
+                )
+                speak_response(
+                    response, tts_model, ref_audio, ref_text,
+                    expression_mode=expr_mode,
+                    stream=False
+                )
 
             # Update conversation history
             conversation.append({"role": "user", "content": user_text})
@@ -542,13 +790,6 @@ def main():
             # Keep conversation manageable
             if len(conversation) > 20:
                 conversation = conversation[-20:]
-
-            # Speak response
-            speak_response(
-                response, tts_model, ref_audio, ref_text,
-                expression_mode=expr_mode,
-                stream=args.stream
-            )
 
     except KeyboardInterrupt:
         print("\n\n👋 Chat ended by user")
