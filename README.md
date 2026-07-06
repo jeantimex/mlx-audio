@@ -18,6 +18,7 @@ The best audio processing library built on Apple's MLX framework, providing fast
 - [Supported Models](#supported-models)
 - [Model Examples](#model-examples)
 - [Voice Cloning](#voice-cloning)
+- [Voice Chat](#voice-chat)
 - [Web Interface \& API Server](#web-interface--api-server)
 - [Quantization](#quantization)
 - [Swift](#swift)
@@ -919,6 +920,75 @@ python -m mlx_audio.tts.generate \
   --text "$TEXT" \
   --play
 ```
+
+## Voice Chat
+
+Real-time voice chat with LLM and TTS. Uses Gemma 3 for conversation, Fish Audio for speech synthesis, and Whisper for transcription.
+
+### Basic Usage
+
+```bash
+# Basic chat
+python scripts/voice_chat.py
+
+# With voice cloning
+python scripts/voice_chat.py --ref_audio reference.wav --ref_text "Reference transcript"
+```
+
+### Fast Mode (Low Latency)
+
+```bash
+# Fast mode with streaming (lowest latency)
+python scripts/voice_chat.py --fast --stream --ref_audio reference.wav
+```
+
+| Mode | First Audio | Models Used |
+|------|-------------|-------------|
+| Default | ~3-5s | gemma-3-4b, Qwen3-ASR |
+| `--fast` | ~1-2s | gemma-3-1b, Voxtral Realtime (streaming STT) |
+| `--stream` | ~2-3s | Plays TTS while generating |
+| `--fast --stream` | <1s | Streaming STT + streaming TTS |
+
+### Expression Tags
+
+The assistant can add expression tags to make speech more natural:
+
+```bash
+# Simple mode (rule-based, default)
+python scripts/voice_chat.py --expression-mode simple
+
+# LLM mode (LLM generates tags naturally)
+python scripts/voice_chat.py --expression-mode llm
+
+# No expression tags
+python scripts/voice_chat.py --expression-mode none
+```
+
+### Chinese Conversation
+
+```bash
+python scripts/voice_chat.py \
+  --fast --stream \
+  --ref_audio yangmi.wav \
+  --language zh \
+  --expression-mode llm \
+  --system_prompt "你是一个友好活泼的中文助手。请用简短的中文回答。"
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--fast` | Off | Use smaller/faster models + streaming STT (Voxtral) |
+| `--stream` | Off | Stream TTS (play while generating) |
+| `--ref_audio` | None | Voice cloning reference audio |
+| `--ref_text` | Auto | Reference audio transcript |
+| `--language` | auto | STT language (auto, en, zh, etc.) |
+| `--expression-mode` | simple | simple, llm, or none |
+| `--system_prompt` | Helpful assistant | LLM system prompt |
+| `--llm_model` | gemma-3-4b-it-4bit | Custom LLM model |
+| `--tts_model` | fish-audio-s2-pro | Custom TTS model |
+| `--stt_model` | Qwen3-ASR (default) / Voxtral (fast) | Custom STT model |
 
 ## Web Interface & API Server
 
