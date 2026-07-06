@@ -35,12 +35,21 @@ OMNIVOICE_TAGS = {
                  "[surprise-ah]", "[surprise-oh]", "[surprise-wa]", "[surprise-yo]", "[dissatisfaction-hnn]"],
 }
 
+FISH_SPEECH_TAGS = {
+    "sounds": ["[laughing]", "[chuckle]", "[sigh]", "[inhale]", "[exhale]", "[panting]", "[clearing throat]", "[tsk]"],
+    "styles": ["[excited]", "[angry]", "[sad]", "[whisper]", "[shouting]", "[loud]", "[low voice]", "[singing]",
+               "[surprised]", "[shocked]", "[delight]", "[pause]", "[emphasis]", "[laughing tone]", "[excited tone]"],
+}
+
 
 def get_system_prompt(model_type: str) -> str:
     """Get the system prompt for tag insertion."""
     if model_type == "omnivoice":
         tags = OMNIVOICE_TAGS
         tag_list = ", ".join(tags["sounds"] + tags["emotions"])
+    elif model_type == "fish-speech":
+        tags = FISH_SPEECH_TAGS
+        tag_list = ", ".join(tags["sounds"] + tags["styles"])
     else:  # chatterbox-turbo
         tags = CHATTERBOX_TURBO_TAGS
         tag_list = ", ".join(tags["sounds"] + tags["styles"])
@@ -138,39 +147,17 @@ def add_tags_with_mlx(text: str, model_type: str, model_name: str = "mlx-communi
 
 def add_tags_simple(text: str, model_type: str) -> str:
     """Simple rule-based tag insertion (no LLM needed)."""
-    import re
+    from mlx_audio.tts.expression_tags import add_expression_tags
 
-    result = text
+    # Map model_type to a model name that the module can detect
+    model_name_map = {
+        "chatterbox-turbo": "chatterbox-turbo",
+        "omnivoice": "omnivoice",
+        "fish-speech": "fish-audio-s2-pro",
+    }
+    model_name = model_name_map.get(model_type, model_type)
 
-    # Laughing indicators
-    laugh_patterns = [
-        (r'(haha|hehe|lol|lmao|rofl|😂|🤣)', r'\1 [laugh]'),
-        (r'([!?])\s*(that\'s (so )?funny|hilarious|too funny)', r'\1 \2 [laugh]'),
-    ]
-
-    # Sighing indicators
-    sigh_patterns = [
-        (r'(sigh|ugh|unfortunately|sadly)', r'[sigh] \1'),
-        (r'\.{3,}', r'... [sigh]'),
-    ]
-
-    # Surprise indicators
-    surprise_patterns = [
-        (r'(oh my god|omg|wow|what\?!|no way)', r'[surprised] \1 [gasp]'),
-    ]
-
-    # Anger indicators
-    if model_type == "chatterbox-turbo":
-        anger_patterns = [
-            (r'([A-Z]{3,}[!]+)', r'[angry] \1'),
-        ]
-        for pattern, replacement in anger_patterns:
-            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
-
-    for pattern, replacement in laugh_patterns + sigh_patterns + surprise_patterns:
-        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
-
-    return result
+    return add_expression_tags(text, model_name, provider="simple")
 
 
 def main():
@@ -182,7 +169,7 @@ def main():
     )
     parser.add_argument(
         "--model-type", "-m",
-        choices=["chatterbox-turbo", "omnivoice"],
+        choices=["chatterbox-turbo", "omnivoice", "fish-speech"],
         default="chatterbox-turbo",
         help="TTS model type (determines available tags)",
     )

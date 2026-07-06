@@ -16,6 +16,45 @@ from typing import Optional
 
 # Canonical tags (model-agnostic) -> Model-specific tags
 TAG_MAPPINGS = {
+    "fish-speech": {
+        # Sounds
+        "laugh": "[laughing]",
+        "laughter": "[laughing]",
+        "chuckle": "[chuckle]",
+        "sigh": "[sigh]",
+        "gasp": "[inhale]",
+        "cough": "[clearing throat]",
+        "groan": "[moaning]",
+        "sniff": "[inhale]",
+        "shush": "[whisper]",
+        "clear_throat": "[clearing throat]",
+        # Styles/Emotions
+        "happy": "[excited]",
+        "angry": "[angry]",
+        "dramatic": "[emphasis]",
+        "sarcastic": "[laughing tone]",
+        "whisper": "[whisper]",
+        "whispering": "[whisper]",
+        "crying": "[sad]",
+        "fear": "[shocked]",
+        "surprised": "[surprised]",
+        "narration": "[low voice]",
+        # Questions/Surprise
+        "question": "[surprised]",
+        "surprise": "[surprised]",
+        # Fish Speech specific
+        "pause": "[pause]",
+        "emphasis": "[emphasis]",
+        "excited": "[excited]",
+        "singing": "[singing]",
+        "shouting": "[shouting]",
+        "loud": "[loud]",
+        "exhale": "[exhale]",
+        "inhale": "[inhale]",
+        "panting": "[panting]",
+        "delight": "[delight]",
+        "dissatisfaction": "[angry]",
+    },
     "chatterbox-turbo": {
         # Sounds
         "laugh": "[laugh]",
@@ -91,7 +130,7 @@ TAG_MAPPINGS = {
 }
 
 # Models that support expression tags
-SUPPORTED_MODELS = ["chatterbox-turbo", "omnivoice"]
+SUPPORTED_MODELS = ["chatterbox-turbo", "omnivoice", "fish-speech"]
 
 
 def detect_model_type(model_name: str) -> Optional[str]:
@@ -104,6 +143,8 @@ def detect_model_type(model_name: str) -> Optional[str]:
         return "omnivoice"
     elif "chatterbox" in model_lower:
         return "chatterbox"
+    elif "fish" in model_lower and ("speech" in model_lower or "audio" in model_lower or "s2" in model_lower):
+        return "fish-speech"
 
     return None
 
@@ -114,13 +155,14 @@ def supports_expression_tags(model_name: str) -> bool:
     return model_type in SUPPORTED_MODELS
 
 
-def convert_tags(text: str, target_model: str) -> str:
+def convert_tags(text: str, target_model: str, preserve_unknown: bool = True) -> str:
     """
     Convert expression tags in text to the target model's format.
 
     Args:
         text: Text with expression tags (any format)
         target_model: Target model name/path
+        preserve_unknown: If True, keep unknown tags as-is instead of removing them
 
     Returns:
         Text with tags converted to target model's format
@@ -128,31 +170,42 @@ def convert_tags(text: str, target_model: str) -> str:
     model_type = detect_model_type(target_model)
 
     if model_type is None or model_type not in TAG_MAPPINGS:
-        # Unknown model, remove all tags
+        # Unknown model - preserve all tags if preserve_unknown, else remove
+        if preserve_unknown:
+            return text
         return re.sub(r'\[[^\]]+\]', '', text)
 
     mapping = TAG_MAPPINGS[model_type]
 
+    # Build set of valid tags for this model (for quick lookup)
+    valid_tags = set(mapping.values()) - {""}  # Exclude empty mappings
+
     # Find all tags in text
     def replace_tag(match):
+        original_tag = f"[{match.group(1)}]"
         tag_content = match.group(1).lower().replace(" ", "_").replace("-", "_")
 
-        # Direct lookup
+        # Check if it's already a valid tag for this model (preserve as-is)
+        if original_tag in valid_tags:
+            return original_tag
+
+        # Check case-insensitive match against valid tags
+        for valid_tag in valid_tags:
+            if valid_tag.lower() == original_tag.lower():
+                return valid_tag
+
+        # Direct lookup in mapping
         if tag_content in mapping:
-            return mapping[tag_content]
+            mapped = mapping[tag_content]
+            return mapped if mapped else (original_tag if preserve_unknown else "")
 
         # Try without brackets that might be in the mapping value
         for canonical, model_tag in mapping.items():
             if canonical == tag_content:
-                return model_tag
+                return model_tag if model_tag else (original_tag if preserve_unknown else "")
 
-        # Check if it's already a valid tag for this model
-        tag_with_brackets = f"[{match.group(1)}]"
-        if tag_with_brackets in mapping.values():
-            return tag_with_brackets
-
-        # Unknown tag, remove it
-        return ""
+        # Unknown tag - preserve or remove based on flag
+        return original_tag if preserve_unknown else ""
 
     result = re.sub(r'\[([^\]]+)\]', replace_tag, text)
 
@@ -340,6 +393,8 @@ def _get_llm_system_prompt(model_type: str) -> str:
     """Get system prompt for LLM tag insertion."""
     if model_type == "omnivoice":
         tags = "[laughter], [sigh], [question-ah], [question-oh], [surprise-ah], [surprise-oh], [dissatisfaction-hnn]"
+    elif model_type == "fish-speech":
+        tags = "[laughing], [chuckle], [sigh], [excited], [angry], [sad], [whisper], [shouting], [surprised], [pause], [emphasis], [singing], [inhale], [exhale], [delight]"
     else:
         tags = "[laugh], [chuckle], [sigh], [gasp], [happy], [angry], [surprised], [whispering], [dramatic], [sarcastic]"
 
