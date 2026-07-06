@@ -1,6 +1,7 @@
 import argparse
 import inspect
 import os
+import re
 import sys
 from os import PathLike
 from pathlib import Path
@@ -16,6 +17,81 @@ from mlx_audio.utils import load_audio
 
 from .audio_player import AudioPlayer
 from .utils import load_model
+
+
+def detect_language(text: str) -> str:
+    """Detect language from text based on character analysis.
+
+    Returns a language code suitable for TTS models.
+    """
+    # Remove expression tags for analysis
+    clean_text = re.sub(r'\[[^\]]+\]', '', text).strip()
+
+    if not clean_text:
+        return "en"
+
+    # Count character types
+    cjk_count = 0
+    hangul_count = 0
+    hiragana_katakana_count = 0
+    cyrillic_count = 0
+    arabic_count = 0
+    thai_count = 0
+    devanagari_count = 0
+    latin_count = 0
+
+    for char in clean_text:
+        code = ord(char)
+        # Chinese (CJK Unified Ideographs)
+        if 0x4E00 <= code <= 0x9FFF or 0x3400 <= code <= 0x4DBF:
+            cjk_count += 1
+        # Korean (Hangul)
+        elif 0xAC00 <= code <= 0xD7AF or 0x1100 <= code <= 0x11FF:
+            hangul_count += 1
+        # Japanese (Hiragana + Katakana)
+        elif 0x3040 <= code <= 0x309F or 0x30A0 <= code <= 0x30FF:
+            hiragana_katakana_count += 1
+        # Cyrillic (Russian, etc.)
+        elif 0x0400 <= code <= 0x04FF:
+            cyrillic_count += 1
+        # Arabic
+        elif 0x0600 <= code <= 0x06FF:
+            arabic_count += 1
+        # Thai
+        elif 0x0E00 <= code <= 0x0E7F:
+            thai_count += 1
+        # Devanagari (Hindi, etc.)
+        elif 0x0900 <= code <= 0x097F:
+            devanagari_count += 1
+        # Latin
+        elif 0x0041 <= code <= 0x007A or 0x00C0 <= code <= 0x00FF:
+            latin_count += 1
+
+    # Determine language based on dominant script
+    counts = {
+        "zh": cjk_count,
+        "ko": hangul_count,
+        "ja": hiragana_katakana_count + cjk_count // 2,  # Japanese uses kanji too
+        "ru": cyrillic_count,
+        "ar": arabic_count,
+        "th": thai_count,
+        "hi": devanagari_count,
+        "en": latin_count,
+    }
+
+    # If Japanese has hiragana/katakana, prioritize it over Chinese
+    if hiragana_katakana_count > 0:
+        counts["ja"] = hiragana_katakana_count + cjk_count
+        counts["zh"] = 0
+
+    max_lang = max(counts, key=counts.get)
+    max_count = counts[max_lang]
+
+    # If no clear winner, default to English
+    if max_count == 0:
+        return "en"
+
+    return max_lang
 
 
 def detect_speech_boundaries(
@@ -157,7 +233,7 @@ def generate_audio(
     prompt: Optional[str] = None,
     instruct: Optional[str] = None,
     speed: float = 1.0,
-    lang_code: str = "en",
+    lang_code: str = "auto",
     cfg_scale: Optional[float] = None,
     ddpm_steps: Optional[int] = None,
     sigma: Optional[float] = None,
@@ -180,6 +256,7 @@ def generate_audio(
     use_zero_spk_emb: bool = False,
     expression_tags: bool = False,
     expression_provider: str = "simple",
+    expression_tags_temperature: float = 0.5,
     **kwargs,
 ) -> None:
     """
@@ -365,7 +442,8 @@ def generate_audio(
             if supports_expression_tags(model_name):
                 original_text = text
                 text = add_expression_tags(
-                    text, model_name, provider=expression_provider
+                    text, model_name, provider=expression_provider,
+                    temperature=expression_tags_temperature
                 )
                 if verbose and text != original_text:
                     print(f"\033[94mExpression tags added:\033[0m {text}")
@@ -381,6 +459,12 @@ def generate_audio(
         if output_path:
             os.makedirs(output_path, exist_ok=True)
             file_prefix = os.path.join(output_path, file_prefix)
+
+        # Auto-detect language if set to "auto"
+        if lang_code == "auto":
+            lang_code = detect_language(text)
+            if verbose:
+                print(f"\033[94mAuto-detected language:\033[0m {lang_code}")
 
         if instruct is not None:
             print(f"\033[94mInstruct:\033[0m {instruct}")
@@ -625,7 +709,12 @@ def parse_args():
         "--gender", type=str, default="male", help="Gender of the voice [male, female]"
     )
     parser.add_argument("--pitch", type=float, default=1.0, help="Pitch of the voice")
-    parser.add_argument("--lang_code", type=str, default="en", help="Language code")
+    parser.add_argument(
+        "--lang_code",
+        type=str,
+        default="auto",
+        help="Language code (auto, en, zh, ja, ko, etc.). Default: auto-detect from text",
+    )
     parser.add_argument(
         "--output_path", type=str, default=None, help="Directory path for output files"
     )
@@ -707,6 +796,12 @@ def parse_args():
         choices=["simple", "anthropic", "mlx"],
         default="simple",
         help="Provider for expression tag insertion: simple (rule-based), anthropic (API), mlx (local LLM)",
+    )
+    parser.add_argument(
+        "--expression-tags-temperature",
+        type=float,
+        default=0.5,
+        help="Expression tag density (0.0 = none, 1.0 = all matches). Default 0.5 for moderate tagging.",
     )
     parser.add_argument(
         "--stream",

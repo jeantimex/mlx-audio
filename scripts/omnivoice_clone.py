@@ -100,6 +100,12 @@ def main():
         default="simple",
         help="Provider for expression tag insertion",
     )
+    parser.add_argument(
+        "--expression-tags-temperature",
+        type=float,
+        default=0.5,
+        help="Expression tag density (0.0 = none, 1.0 = all matches). Default 0.5.",
+    )
     args = parser.parse_args()
 
     ref_audio_path = Path(args.ref_audio)
@@ -195,7 +201,11 @@ def main():
         from mlx_audio.tts.expression_tags import add_expression_tags
 
         original_text = text
-        text = add_expression_tags(text, args.model, provider=args.expression_provider)
+        text = add_expression_tags(
+            text, args.model,
+            provider=args.expression_provider,
+            temperature=args.expression_tags_temperature
+        )
         print(f"\n\033[94mOriginal text:\033[0m {original_text}")
         if text != original_text:
             print(f"\033[92mWith expression tags:\033[0m {text}")

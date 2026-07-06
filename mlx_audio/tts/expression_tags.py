@@ -11,6 +11,7 @@ This module provides:
 3. Rule-based tag insertion
 """
 
+import random
 import re
 from typing import Optional
 
@@ -220,6 +221,7 @@ def add_expression_tags(
     target_model: str,
     provider: str = "simple",
     llm_model: Optional[str] = None,
+    temperature: float = 0.5,
 ) -> str:
     """
     Add expression tags to text for a specific TTS model.
@@ -229,6 +231,8 @@ def add_expression_tags(
         target_model: Target TTS model name/path
         provider: "simple" (rule-based), "anthropic", or "mlx"
         llm_model: LLM model for mlx provider
+        temperature: Controls how many tags to add (0.0 = none, 1.0 = all matches).
+                    Default 0.5 adds tags to ~50% of matches.
 
     Returns:
         Text with appropriate expression tags for the model
@@ -239,12 +243,16 @@ def add_expression_tags(
         # Model doesn't support tags, return as-is
         return text
 
+    # Temperature 0 means no tags
+    if temperature <= 0:
+        return text
+
     if provider == "simple":
-        tagged_text = _add_tags_simple(text)
+        tagged_text = _add_tags_simple(text, temperature=temperature)
     elif provider == "anthropic":
-        tagged_text = _add_tags_anthropic(text, model_type)
+        tagged_text = _add_tags_anthropic(text, model_type, temperature=temperature)
     elif provider == "mlx":
-        tagged_text = _add_tags_mlx(text, model_type, llm_model)
+        tagged_text = _add_tags_mlx(text, model_type, llm_model, temperature=temperature)
     else:
         tagged_text = text
 
@@ -252,20 +260,35 @@ def add_expression_tags(
     return convert_tags(tagged_text, target_model)
 
 
-def _add_tags_simple(text: str) -> str:
-    """Simple rule-based tag insertion using canonical tags."""
+def _add_tags_simple(text: str, temperature: float = 0.5) -> str:
+    """Simple rule-based tag insertion using canonical tags.
+
+    Args:
+        text: Input text
+        temperature: Controls tag density (0.0 = none, 1.0 = all matches)
+    """
     result = text
+
+    def prob_sub(pattern, replacement, text, flags=0):
+        """Apply regex substitution with probability based on temperature."""
+        def replacer(match):
+            # Use temperature as probability threshold
+            if random.random() < temperature:
+                # Expand the replacement pattern
+                return match.expand(replacement)
+            return match.group(0)  # Keep original
+        return re.sub(pattern, replacer, text, flags=flags)
 
     # === English patterns ===
 
     # Laughing indicators
-    result = re.sub(
+    result = prob_sub(
         r'(haha|hehe|lol|lmao|rofl|😂|🤣)',
         r'\1 [laugh]',
         result,
         flags=re.IGNORECASE
     )
-    result = re.sub(
+    result = prob_sub(
         r'([!?])\s*(that\'s (so )?funny|hilarious|too funny)',
         r'\1 \2 [laugh]',
         result,
@@ -273,13 +296,13 @@ def _add_tags_simple(text: str) -> str:
     )
 
     # Sighing indicators
-    result = re.sub(
+    result = prob_sub(
         r'\b(sigh|ugh)\b',
         r'[sigh] \1',
         result,
         flags=re.IGNORECASE
     )
-    result = re.sub(
+    result = prob_sub(
         r'(unfortunately|sadly|i\'m (so )?tired)',
         r'[sigh] \1',
         result,
@@ -287,13 +310,13 @@ def _add_tags_simple(text: str) -> str:
     )
 
     # Surprise indicators
-    result = re.sub(
+    result = prob_sub(
         r'\b(oh my god|omg|wow|no way)\b',
         r'[surprise] \1 [gasp]',
         result,
         flags=re.IGNORECASE
     )
-    result = re.sub(
+    result = prob_sub(
         r'(what\?!+|really\?!+)',
         r'[surprise] \1',
         result,
@@ -301,7 +324,7 @@ def _add_tags_simple(text: str) -> str:
     )
 
     # Question indicators
-    result = re.sub(
+    result = prob_sub(
         r'(huh\?|eh\?|what\?(?![!]))',
         r'[question] \1',
         result,
@@ -309,14 +332,14 @@ def _add_tags_simple(text: str) -> str:
     )
 
     # Anger indicators (ALL CAPS with exclamation)
-    result = re.sub(
+    result = prob_sub(
         r'\b([A-Z]{4,}!+)',
         r'[angry] \1',
         result
     )
 
     # Whisper indicators
-    result = re.sub(
+    result = prob_sub(
         r'\b(shh+|psst|quietly)\b',
         r'[whisper] \1',
         result,
@@ -324,7 +347,7 @@ def _add_tags_simple(text: str) -> str:
     )
 
     # Happy indicators
-    result = re.sub(
+    result = prob_sub(
         r'\b(yay|hooray|wonderful|amazing|fantastic)\b',
         r'[happy] \1',
         result,
@@ -334,7 +357,7 @@ def _add_tags_simple(text: str) -> str:
     # === Chinese patterns ===
 
     # Laughing indicators (哈哈, 嘻嘻, 呵呵, 笑死)
-    result = re.sub(
+    result = prob_sub(
         r'(哈哈+|嘻嘻+|呵呵+|笑死了?|太好笑了)',
         r'\1 [laugh]',
         result
@@ -342,42 +365,42 @@ def _add_tags_simple(text: str) -> str:
 
     # Happy indicators (开心, 高兴, 太棒了, 太好了, 真好, 太爽了)
     # Use word boundary-like pattern to avoid partial matches
-    result = re.sub(
+    result = prob_sub(
         r'(真?他妈的?开心|真?开心|好开心|很开心|超开心|太开心了?|好高兴|很高兴|真高兴|太高兴了?|太棒了|太好了|真好|太爽了|好爽|爽死了?|耶+)',
         r'[happy] \1',
         result
     )
 
     # Sighing indicators (唉, 哎, 算了, 无奈, 累)
-    result = re.sub(
+    result = prob_sub(
         r'(唉+|哎+|算了|无奈|好累|真累|太累了|累死了|心累)',
         r'[sigh] \1',
         result
     )
 
     # Surprise indicators (哇, 天哪, 我的天, 卧槽, 靠, 厉害, 神奇)
-    result = re.sub(
+    result = prob_sub(
         r'(哇+塞?|天哪|我的天|天啊|我靠|卧槽|牛逼|太厉害了?|不可思议|很神奇|太神奇了?|真神奇|难以置信|不敢相信)',
         r'[surprise] \1',
         result
     )
 
     # Anger indicators (气死, 烦死, 讨厌, 该死)
-    result = re.sub(
+    result = prob_sub(
         r'(气死.{0,2}了?|烦死.{0,2}了?|讨厌|该死|真烦|好烦|太烦了|受不了|忍不了)',
         r'[angry] \1',
         result
     )
 
     # Question indicators (啊?, 吗?, 呢?, 什么)
-    result = re.sub(
+    result = prob_sub(
         r'(真的吗|是吗|什么\?|啥\?|为什么|怎么回事)',
         r'[question] \1',
         result
     )
 
     # Dissatisfaction (哼, 切, 无语)
-    result = re.sub(
+    result = prob_sub(
         r'(哼+|切+|无语|服了|醉了)',
         r'[dissatisfaction] \1',
         result
@@ -389,7 +412,7 @@ def _add_tags_simple(text: str) -> str:
     return result
 
 
-def _get_llm_system_prompt(model_type: str) -> str:
+def _get_llm_system_prompt(model_type: str, temperature: float = 0.5) -> str:
     """Get system prompt for LLM tag insertion."""
     if model_type == "omnivoice":
         tags = "[laughter], [sigh], [question-ah], [question-oh], [surprise-ah], [surprise-oh], [dissatisfaction-hnn]"
@@ -398,16 +421,25 @@ def _get_llm_system_prompt(model_type: str) -> str:
     else:
         tags = "[laugh], [chuckle], [sigh], [gasp], [happy], [angry], [surprised], [whispering], [dramatic], [sarcastic]"
 
+    # Adjust density instruction based on temperature
+    if temperature <= 0.3:
+        density = "Be very conservative - only add tags for the most obvious and strong expressions."
+    elif temperature <= 0.6:
+        density = "Be moderate - add tags where expressions are clearly present, but don't overdo it."
+    else:
+        density = "Be generous - add tags wherever an expression could naturally occur."
+
     return f"""You add expression tags to text for text-to-speech synthesis.
 
 Available tags: {tags}
 
 Rules:
 1. Add tags where natural expressions would occur
-2. Don't overuse - only where it genuinely improves expression
+2. {density}
 3. Place sound tags ([laugh], [sigh]) AFTER the triggering phrase
 4. Place style tags ([happy], [angry]) BEFORE the emotional section
-5. Return ONLY the modified text, no explanations
+5. Preserve any existing tags in the text - do not remove or modify them
+6. Return ONLY the modified text, no explanations
 
 Examples:
 - "That's so funny!" → "That's so funny! [laugh]"
@@ -416,36 +448,36 @@ Examples:
 """
 
 
-def _add_tags_anthropic(text: str, model_type: str) -> str:
+def _add_tags_anthropic(text: str, model_type: str, temperature: float = 0.5) -> str:
     """Use Anthropic API to add expression tags."""
     import os
     try:
         import anthropic
     except ImportError:
-        return _add_tags_simple(text)
+        return _add_tags_simple(text, temperature=temperature)
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return _add_tags_simple(text)
+        return _add_tags_simple(text, temperature=temperature)
 
     client = anthropic.Anthropic(api_key=api_key)
 
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=1024,
-        system=_get_llm_system_prompt(model_type),
+        system=_get_llm_system_prompt(model_type, temperature=temperature),
         messages=[{"role": "user", "content": text}]
     )
 
     return response.content[0].text.strip()
 
 
-def _add_tags_mlx(text: str, model_type: str, model_name: Optional[str] = None) -> str:
+def _add_tags_mlx(text: str, model_type: str, model_name: Optional[str] = None, temperature: float = 0.5) -> str:
     """Use local MLX model to add expression tags."""
     try:
         from mlx_lm import load, generate
     except ImportError:
-        return _add_tags_simple(text)
+        return _add_tags_simple(text, temperature=temperature)
 
     if model_name is None:
         model_name = "mlx-community/Llama-3.2-3B-Instruct-4bit"
@@ -453,7 +485,7 @@ def _add_tags_mlx(text: str, model_type: str, model_name: Optional[str] = None) 
     model, tokenizer = load(model_name)
 
     messages = [
-        {"role": "system", "content": _get_llm_system_prompt(model_type)},
+        {"role": "system", "content": _get_llm_system_prompt(model_type, temperature=temperature)},
         {"role": "user", "content": text}
     ]
 
