@@ -17,11 +17,27 @@ Usage:
 Requirements:
     - Reference audio must be >5 seconds (Turbo) or >6 seconds (regular)
     - Clear speech with minimal background noise
+
+Note:
+    Voice profiles are only supported for Chatterbox and Chatterbox-Turbo models.
+    For OmniVoice, use --ref_audio and --ref_text directly with mlx_audio.tts.generate.
 """
 
 import argparse
 import sys
 from pathlib import Path
+
+SUPPORTED_MODELS = [
+    "chatterbox-turbo",
+    "chatterbox-fp16",
+    "chatterbox",
+]
+
+
+def is_supported_model(model_name: str) -> bool:
+    """Check if model supports voice profiles."""
+    model_lower = model_name.lower()
+    return any(supported in model_lower for supported in SUPPORTED_MODELS)
 
 
 def main():
@@ -65,6 +81,22 @@ def main():
     ref_audio_path = Path(args.ref_audio)
     if not ref_audio_path.exists():
         print(f"Error: Reference audio not found: {ref_audio_path}")
+        sys.exit(1)
+
+    # Check if model supports voice profiles
+    if not is_supported_model(args.model):
+        print(f"Error: Voice profiles are only supported for Chatterbox models.")
+        print(f"Model '{args.model}' does not support pre-computed voice profiles.")
+        print()
+        print("For OmniVoice, use --ref_audio and --ref_text directly:")
+        print()
+        print("  python -m mlx_audio.tts.generate \\")
+        print("    --model mlx-community/OmniVoice-bf16 \\")
+        print(f"    --ref_audio {ref_audio_path} \\")
+        print("    --ref_text \"Transcript of the reference audio\" \\")
+        print("    --text \"Your text here\" \\")
+        print("    --lang_code chinese \\")
+        print("    --play")
         sys.exit(1)
 
     # Determine output path

@@ -45,6 +45,24 @@ The best audio processing library built on Apple's MLX framework, providing fast
 pip install mlx-audio
 ```
 
+### Optional dependencies
+
+```bash
+# TTS with Chinese support
+pip install mlx-audio[tts]
+
+# Voice cloning utilities (reference audio preparation, transcription)
+pip install mlx-audio[voice-cloning]
+
+# All features
+pip install mlx-audio[all]
+```
+
+For voice isolation (removing background music), also install:
+```bash
+pipx install 'audio-separator[cpu]'
+```
+
 ### Using uv to install only the command line tools
 Latest release from pypi:
 ```bash
@@ -746,6 +764,98 @@ python -m mlx_audio.tts.generate \
   --text "Using my saved multilingual voice!" \
   --play
 ```
+
+**Chinese language support:**
+
+For proper Chinese pronunciation, install the segmentation library:
+
+```bash
+pip install spacy-pkuseg
+# or install with voice-cloning extras:
+pip install mlx-audio[voice-cloning]
+```
+
+Then use `--lang_code zh`:
+
+```bash
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-fp16 \
+  --profile chinese_voice.profile \
+  --lang_code zh \
+  --text "你好，这是中文语音合成测试。" \
+  --play
+```
+
+**Tips for better Chinese output:**
+- Use clear Chinese reference audio (>6 seconds)
+- Lower `--exaggeration` (0.3) for more natural tone
+- Lower `--temperature` (0.6) for more stable output
+
+### OmniVoice (646+ Languages with Expression Tags)
+
+OmniVoice supports 646+ languages with voice cloning and expression tags like `[laughter]`, `[sigh]`. It requires a special preprocessing workflow for voice cloning.
+
+**Use the helper script for voice cloning:**
+
+```bash
+# Chinese with expression tags
+python scripts/omnivoice_clone.py \
+  --ref_audio reference.wav \
+  --text "这真是太好笑了 [laughter] 我简直不敢相信。" \
+  --language chinese \
+  --play
+
+# English
+python scripts/omnivoice_clone.py \
+  --ref_audio reference.wav \
+  --text "That's amazing! [laughter] I can't believe it." \
+  --language english \
+  --play
+```
+
+**Save preprocessed files for faster reuse:**
+
+```bash
+# First time: preprocess and save
+python scripts/omnivoice_clone.py \
+  --ref_audio reference.wav \
+  --text "Hello world!" \
+  --language english \
+  --save-preprocessed \
+  --play
+
+# Subsequent runs: skip preprocessing (faster)
+python scripts/omnivoice_clone.py \
+  --ref_audio reference.preprocessed.wav \
+  --ref_text "$(cat reference.preprocessed.txt)" \
+  --text "Another sentence with the same voice." \
+  --language english \
+  --skip-preprocess \
+  --play
+```
+
+**Supported expression tags:**
+
+| Tag | Description |
+|-----|-------------|
+| `[laughter]` | Laughing |
+| `[sigh]` | Sighing |
+| `[question-ah]`, `[question-oh]` | Question interjections |
+| `[surprise-ah]`, `[surprise-oh]` | Surprise interjections |
+| `[dissatisfaction-hnn]` | Dissatisfaction |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--ref_audio`, `-r` | Reference audio file |
+| `--text`, `-t` | Text to synthesize |
+| `--language`, `-l` | Language (english, chinese, french, etc.) |
+| `--output`, `-o` | Output file (default: output.wav) |
+| `--play`, `-p` | Play audio after generation |
+| `--save-preprocessed` | Save preprocessed audio + transcript for reuse |
+| `--skip-preprocess` | Skip preprocessing (use with saved files) |
+| `--num_steps` | Generation quality (default: 32, higher = better) |
 
 ## Web Interface & API Server
 

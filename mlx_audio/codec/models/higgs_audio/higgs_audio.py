@@ -37,8 +37,7 @@ def _sinc_resample(
     t = np.clip(t, -lowpass_filter_width, lowpass_filter_width)
 
     window = np.cos(t * np.pi / lowpass_filter_width / 2) ** 2
-    t_pi = t * np.pi
-    kernel = np.where(t_pi == 0, 1.0, np.sin(t_pi) / t_pi)
+    kernel = np.sinc(t)  # np.sinc(t) = sin(pi*t)/(pi*t), handles t=0 correctly
     kernel = (kernel * window * (base_freq / orig_r)).astype(np.float32)
 
     length = len(waveform)

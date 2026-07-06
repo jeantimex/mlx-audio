@@ -40,6 +40,14 @@ stt = [
 tts = [
     "mistral-common[audio]",
     "sentencepiece>=0.2.0",
+    "spacy-pkuseg>=1.0.0",  # Chinese word segmentation for Chatterbox
+]
+
+# Voice cloning utilities (reference audio preparation)
+voice-cloning = [
+    "faster-whisper>=1.0.0",  # Transcription for reference audio
+    "yt-dlp>=2024.0.0",  # YouTube audio download
+    "spacy-pkuseg>=1.0.0",  # Chinese word segmentation
 ]
 
 # Server dependencies
@@ -63,12 +71,16 @@ sts = [
 all = [
     "mistral-common[audio]",
     "sentencepiece>=0.2.0",
+    "spacy-pkuseg>=1.0.0",
 
     "fastapi>=0.95.0",
     "uvicorn[standard]>=0.22.0",
 
     "webrtcvad>=2.0.10",
     "setuptools<81", # pinned because >=81 drops pkg_resources which breaks webrtcvad
+
+    "faster-whisper>=1.0.0",
+    "yt-dlp>=2024.0.0",
 ]
 
 # Development dependencies
