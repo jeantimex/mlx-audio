@@ -17,6 +17,7 @@ The best audio processing library built on Apple's MLX framework, providing fast
 - [Quick Start](#quick-start)
 - [Supported Models](#supported-models)
 - [Model Examples](#model-examples)
+- [Voice Cloning](#voice-cloning)
 - [Web Interface \& API Server](#web-interface--api-server)
 - [Quantization](#quantization)
 - [Swift](#swift)
@@ -126,6 +127,7 @@ for result in model.generate(
 | **OuteTTS** | Efficient TTS model | EN | [mlx-community/OuteTTS-1.0-0.6B-fp16](https://huggingface.co/mlx-community/OuteTTS-1.0-0.6B-fp16) |
 | **Spark** | SparkTTS model | EN, ZH | [mlx-community/Spark-TTS-0.5B-bf16](https://huggingface.co/mlx-community/Spark-TTS-0.5B-bf16) |
 | **Chatterbox** | Expressive multilingual TTS | EN, ES, FR, DE, IT, PT, PL, TR, RU, NL, CS, AR, ZH, JA, HU, KO | [mlx-community/chatterbox-fp16](https://huggingface.co/mlx-community/chatterbox-fp16) |
+| **Chatterbox-Turbo** | Fast TTS with paralinguistic tags (`[laugh]`, `[sigh]`, etc.) and voice cloning | EN | [mlx-community/chatterbox-turbo-fp16](https://huggingface.co/mlx-community/chatterbox-turbo-fp16) |
 | **Soprano** | High-quality TTS | EN | [mlx-community/Soprano-1.1-80M-bf16](https://huggingface.co/mlx-community/Soprano-1.1-80M-bf16) |
 | **Ming Omni TTS (BailingMM)** | Multimodal generation with voice cloning, style control, and speech/music/event generation | EN, ZH | [mlx-community/Ming-omni-tts-16.8B-A3B-bf16](https://huggingface.co/mlx-community/Ming-omni-tts-16.8B-A3B-bf16) |
 | **Ming Omni TTS (Dense)** | Lightweight dense Ming Omni variant for voice cloning and style control | EN, ZH | [mlx-community/Ming-omni-tts-0.5B-bf16](https://huggingface.co/mlx-community/Ming-omni-tts-0.5B-bf16) |
@@ -588,6 +590,76 @@ model = MossFormer2SEModel.from_pretrained("starkdmi/MossFormer2_SE_48K_MLX")
 enhanced = model.enhance("noisy_speech.wav")
 save_audio(enhanced, "clean.wav", 48000)
 ```
+
+## Voice Cloning
+
+Many TTS models support zero-shot voice cloning using a reference audio sample. This section covers how to prepare reference audio and use it for voice cloning.
+
+### Preparing Reference Audio
+
+Use the `generate_reference.py` script to create a reference audio clip from a local file or YouTube video:
+
+```bash
+# Install dependencies
+pip install faster-whisper yt-dlp
+pipx install 'audio-separator[cpu]'  # for voice isolation (optional)
+
+# From a local audio file
+python scripts/generate_reference.py audio.mp3 --start 0:30 --end 0:45 --transcribe
+
+# From YouTube with voice isolation and transcription
+python scripts/generate_reference.py "https://youtube.com/watch?v=VIDEO_ID" \
+  --start 1:30 --end 1:45 --isolate-voice --transcribe
+
+# Custom output filename
+python scripts/generate_reference.py audio.wav -s 0:10 -e 0:25 -o my_voice.wav --transcribe
+```
+
+**Options:**
+- `--start`, `-s`: Start time (e.g., `1:30` or `90`)
+- `--end`, `-e`: End time (e.g., `1:45` or `105`)
+- `--output`, `-o`: Output filename (default: `reference.wav`)
+- `--isolate-voice`, `-i`: Remove background music/noise using audio-separator
+- `--transcribe`, `-t`: Generate reference text using faster-whisper
+- `--whisper-model`: Whisper model size (`tiny`, `base`, `small`, `medium`, `large-v3`)
+
+The script outputs a WAV file and optionally a `.txt` file with the transcript.
+
+### Chatterbox-Turbo
+
+Chatterbox-Turbo is a fast English TTS model with voice cloning and paralinguistic tags for expressive speech.
+
+**Basic usage:**
+
+```bash
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-turbo-fp16 \
+  --text "Hello, this is a test!" \
+  --play
+```
+
+**Voice cloning** (requires reference audio >5 seconds):
+
+```bash
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-turbo-fp16 \
+  --text "This should sound like the reference voice." \
+  --ref_audio reference.wav \
+  --play
+```
+
+**Paralinguistic tags** for expressive speech:
+
+```bash
+python -m mlx_audio.tts.generate \
+  --model mlx-community/chatterbox-turbo-fp16 \
+  --text "That's hilarious! [chuckle] I can't believe it. [sigh]" \
+  --play
+```
+
+Supported tags:
+- **Sounds:** `[laugh]`, `[chuckle]`, `[sigh]`, `[gasp]`, `[cough]`, `[groan]`, `[sniff]`, `[shush]`, `[clear throat]`
+- **Styles:** `[happy]`, `[angry]`, `[dramatic]`, `[sarcastic]`, `[whispering]`, `[crying]`, `[fear]`, `[surprised]`, `[narration]`
 
 ## Web Interface & API Server
 
